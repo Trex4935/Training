@@ -5,9 +5,15 @@
 package frc.robot;
 
 import frc.robot.Constants.OperatorConstants;
+import frc.robot.subsystems.pivot.Pivot;
+import frc.robot.subsystems.pivot.Pivot.PivotState;
+import frc.robot.subsystems.pivot.PivotIO;
+import frc.robot.subsystems.pivot.PivotIOReal;
+import frc.robot.subsystems.pivot.PivotIOSim;
 
-import edu.wpi.first.wpilibj2.command.Command;
+import edu.wpi.first.wpilibj.RobotBase;
 import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
+import edu.wpi.first.wpilibj2.command.button.RobotModeTriggers;
 import edu.wpi.first.wpilibj2.command.button.Trigger;
 
 /**
@@ -18,6 +24,7 @@ import edu.wpi.first.wpilibj2.command.button.Trigger;
  */
 public class RobotContainer {
   // The robot's subsystems and commands are defined here...
+  private final Pivot pivot;
 
   // Replace with CommandPS4Controller or CommandJoystick if needed
   private final CommandXboxController m_driverController =
@@ -25,6 +32,10 @@ public class RobotContainer {
 
   /** The container for the robot. Contains subsystems, OI devices, and commands. */
   public RobotContainer() {
+    // Real robot -> real TalonFX. Simulator -> fake pivot. Pivot itself doesn't know the difference.
+    PivotIO pivotIO = RobotBase.isReal() ? new PivotIOReal() : new PivotIOSim();
+    pivot = new Pivot(pivotIO);
+
     // Configure the trigger bindings
     configureBindings();
   }
@@ -39,5 +50,17 @@ public class RobotContainer {
    * joysticks}.
    */
   private void configureBindings() {
+    // Home the pivot as soon as the robot is enabled in auto or teleop, unless it already homed.
+    RobotModeTriggers.autonomous()
+        .or(RobotModeTriggers.teleop())
+        .onTrue(pivot.home().unless(pivot::isHomed));
+
+    m_driverController.a().onTrue(pivot.goTo(PivotState.DOWN));
+    m_driverController.b().onTrue(pivot.goTo(PivotState.AGITATE));
+    m_driverController.y().onTrue(pivot.goTo(PivotState.STOW));
+    m_driverController.start().onTrue(pivot.home()); // re-home on demand
+
+    // When nothing else is using the pivot, follow the "Pivot/Test Target" number on the dashboard.
+    pivot.setDefaultCommand(pivot.followTestTarget());
   }
 }
