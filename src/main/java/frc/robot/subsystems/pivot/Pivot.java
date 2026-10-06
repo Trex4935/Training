@@ -12,6 +12,7 @@ import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import frc.robot.Constants.PivotConstants;
+import frc.robot.subsystems.pivot.Pivot.PivotState;
 
 public class Pivot extends SubsystemBase {
   public enum PivotState {
@@ -114,4 +115,13 @@ public class Pivot extends SubsystemBase {
           }
         });
   }
+
+ public Command agitate = Commands.repeatingSequence(
+    Commands.runOnce(() ->
+        goToPositionDegrees(PivotState.AGITATE.degrees), this),
+    Commands.waitSeconds(0.5),
+    Commands.runOnce(() ->
+        goToPositionDegrees(PivotState.DOWN.degrees), this),
+    Commands.waitSeconds(0.5)
+);
 }

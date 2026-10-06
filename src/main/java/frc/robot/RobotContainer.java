@@ -39,9 +39,15 @@ public class RobotContainer {
     driverController.b().onTrue(
         Commands.runOnce(() -> pivot.goToPositionDegrees(PivotState.STOW.degrees), pivot));
     driverController.start().onTrue(pivot.home());
-
     SmartDashboard.putData(
         "Pivot/RESET ZERO AT HARDSTOP",
         Commands.runOnce(pivot::resetZeroAtHardstop, pivot).ignoringDisable(true));
+    driverController.povUp().onTrue(pivot.agitate);
+
+    SmartDashboard.putNumber("Pivot/Target Degrees Slider", PivotState.DOWN.degrees);
+    driverController.x().whileTrue(Commands.run(
+        () -> pivot.goToPositionDegrees(
+            SmartDashboard.getNumber("Pivot/Target Degrees Slider", PivotState.DOWN.degrees)),
+        pivot));
   }
 }
