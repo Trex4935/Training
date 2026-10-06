@@ -4,8 +4,46 @@
 
 package frc.robot.subsystems.pivot;
 
-// TODO (Implementation team): talk to the real TalonFX.
-//  - Build the TalonFX config from PivotConstants (motor output, feedback, current limits,
-//    Motion Magic, Slot0 PID)
-//  - Implement every PivotIO method (Motion Magic for positions, VoltageOut for homing)
-public class PivotIOReal implements PivotIO {}
+
+public class PivotIOReal implements PivotIO {
+
+
+  public PivotIOReal() {
+    TalonFXConfiguration config = new TalonFXConfiguration()
+        .withMotorOutput(
+            new MotorOutputConfigs()
+                .withNeutralMode(NeutralModeValue.Brake)
+                .withInverted(
+                    PivotConstants.kMotorInverted
+                        ? InvertedValue.Clockwise_Positive
+                        : InvertedValue.CounterClockwise_Positive))
+        .withFeedback(
+            new FeedbackConfigs()
+                .withSensorToMechanismRatio(PivotConstants.kGearRatio)
+                .withFeedbackSensorSource(FeedbackSensorSourceValue.RotorSensor))
+        .withCurrentLimits(
+            new CurrentLimitsConfigs()
+                .withStatorCurrentLimit(PivotConstants.kStatorCurrentLimitAmps)
+                .withStatorCurrentLimitEnable(true)
+                .withSupplyCurrentLimit(PivotConstants.kSupplyCurrentLimitAmps)
+                .withSupplyCurrentLimitEnable(true))
+        .withMotionMagic(
+            new MotionMagicConfigs()
+                .withMotionMagicCruiseVelocity(
+                    Units.degreesToRotations(PivotConstants.kCruiseVelocityDegreesPerSecond))
+                .withMotionMagicAcceleration(
+                    Units.degreesToRotations(PivotConstants.kAccelerationDegreesPerSecondSquared)))
+        .withSlot0(
+            new Slot0Configs()
+                .withKP(PivotConstants.kP)
+                .withKI(PivotConstants.kI)
+                .withKD(PivotConstants.kD)
+                .withKV(PivotConstants.kV));
+    motor.getConfigurator().apply(config);
+
+    BaseStatusSignal.setUpdateFrequencyForAll(
+        100, motor.getStatorCurrent(), motor.getSupplyCurrent(), motor.getVelocity());
+  }
+
+
+}
