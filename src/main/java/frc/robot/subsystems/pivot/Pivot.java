@@ -4,11 +4,47 @@
 
 package frc.robot.subsystems.pivot;
 
+import edu.wpi.first.math.filter.Debouncer;
+import edu.wpi.first.math.filter.Debouncer.DebounceType;
+import edu.wpi.first.wpilibj2.command.Command;
+import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
+import frc.robot.Constants.PivotConstants;
 
-// TODO (Implementation team): the Pivot subsystem.
-//  - PivotState enum (HOME, DOWN, AGITATE, STOW) holding positions in degrees
-//  - Read inputs from the IO in periodic() and publish them to SmartDashboard
-//  - goToPositionDegrees, zeroEncoder, stop, getPositionDegrees
-//  - Homing logic (provided by the mentors)
-public class Pivot extends SubsystemBase {}
+public class Pivot extends SubsystemBase {
+
+
+  @Override
+  public void periodic() {
+    io.updateInputs(inputs);
+
+    boolean pushingHard = inputs.statorCurrentAmps > PivotConstants.kHomingCurrentThresholdAmps;
+    boolean stopped = Math.abs(inputs.velocityDegreesPerSecond)
+        < PivotConstants.kHomingVelocityThresholdDegreesPerSecond;
+    atHardstop = hardstopDebouncer.calculate(seekingHardstop && pushingHard && stopped);
+  }
+  public Command home() {
+    return Commands.sequence(
+        Commands.sequence(
+            Commands.run(() -> io.setHomingOutput(PivotConstants.kHomingVolts), this)
+                .withTimeout(PivotConstants.kHomingStartupGraceSeconds),
+            Commands.runOnce(() -> seekingHardstop = true),
+            Commands.run(() -> io.setHomingOutput(PivotConstants.kHomingVolts), this)
+                .until(() -> atHardstop))
+            .withTimeout(PivotConstants.kHomingTimeoutSeconds),
+        Commands.runOnce(() -> {
+          io.stop();
+          if (atHardstop) {
+            zeroEncoder();
+            homed = true;
+            goToPositionDegrees(PivotState.DOWN.degrees);
+          }
+        }, this))
+        .finallyDo(interrupted -> {
+          seekingHardstop = false;
+          if (interrupted) {
+            io.stop();
+          }
+        });
+  }
+}
