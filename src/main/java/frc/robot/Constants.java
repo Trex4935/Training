@@ -29,9 +29,9 @@ public final class Constants {
 
     public static final double kCruiseVelocityDegreesPerSecond = 36000.0;
     public static final double kAccelerationDegreesPerSecondSquared = kCruiseVelocityDegreesPerSecond / kGearRatio; 
-    public static final double kP = 70.0;
+    public static final double kP = 30.0;
     public static final double kI = 0.0;
-    public static final double kD = 0.0;
+    public static final double kD = 5.0;
     public static final double kV = 0.12;
 
     public static final double kHomingVolts = 3.0;
