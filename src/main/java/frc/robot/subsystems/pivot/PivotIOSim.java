@@ -32,7 +32,6 @@ public class PivotIOSim implements PivotIO {
       }
     }
 
-    inputs.positionDegrees = trueDegrees - encoderOffsetDegrees;
     inputs.velocityDegreesPerSecond = velocity;
     inputs.statorCurrentAmps = current;
   }

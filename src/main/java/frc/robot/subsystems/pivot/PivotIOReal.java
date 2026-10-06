@@ -4,9 +4,31 @@
 
 package frc.robot.subsystems.pivot;
 
+import java.security.KeyStore.PrivateKeyEntry;
+
+import com.ctre.phoenix6.BaseStatusSignal;
+import com.ctre.phoenix6.configs.CurrentLimitsConfigs;
+import com.ctre.phoenix6.configs.FeedbackConfigs;
+import com.ctre.phoenix6.configs.MotionMagicConfigs;
+import com.ctre.phoenix6.configs.MotorOutputConfigs;
+import com.ctre.phoenix6.configs.Slot0Configs;
+import com.ctre.phoenix6.configs.TalonFXConfiguration;
+import com.ctre.phoenix6.controls.MotionMagicVoltage;
+import com.ctre.phoenix6.controls.VoltageOut;
+import com.ctre.phoenix6.hardware.TalonFX;
+import com.ctre.phoenix6.signals.FeedbackSensorSourceValue;
+import com.ctre.phoenix6.signals.InvertedValue;
+import com.ctre.phoenix6.signals.NeutralModeValue;
+
+import edu.wpi.first.math.util.Units;
+import frc.robot.Constants.PivotConstants;
 
 public class PivotIOReal implements PivotIO {
+    private final TalonFX motor = new TalonFX(PivotConstants.kMotorCanId);
 
+    private final MotionMagicVoltage motionMagicRequest = new MotionMagicVoltage(0);
+
+    private final VoltageOut homingRequest = new VoltageOut(0);
 
   public PivotIOReal() {
     TalonFXConfiguration config = new TalonFXConfiguration()
@@ -45,5 +67,24 @@ public class PivotIOReal implements PivotIO {
         100, motor.getStatorCurrent(), motor.getSupplyCurrent(), motor.getVelocity());
   }
 
+  public void updateInputs(PivotIOInputs inputs) {
+    inputs.postionDegrees = Units.rotationsToDegrees(motor.getPosition().getValueAsDouble());
+    inputs.velocityDegreesPerSecond = Units.rotationsToDegrees(motor.getVelocity().getValueAsDouble());
+    inputs.statorCurrentAmps = motor.getStatorCurrent().getValueAsDouble();
+  }
 
+  public void setPositionDegrees(double degrees){
+    motor.setControl(motionMagicRequest.withPosition(Units.degreesToRotations(degrees)));
+  }
+  public void setHomingOutput(double volts){
+    motor.setControl(homingRequest.withOutput(volts));
+  }
+
+  public void setEncoderPositionDegrees(double degrees){
+    motor.setPosition(Units.degreesToRotations(degrees));
+  }
+
+  public void stop(){
+    motor.stopMotor();
+  }
 }

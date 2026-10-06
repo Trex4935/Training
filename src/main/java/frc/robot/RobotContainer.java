@@ -4,19 +4,50 @@
 
 package frc.robot;
 
+import edu.wpi.first.wpilibj.RobotBase;
+import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
+import edu.wpi.first.wpilibj2.command.Command;
+import edu.wpi.first.wpilibj2.command.Commands;
+import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
+import edu.wpi.first.wpilibj2.command.button.RobotModeTriggers;
+import frc.robot.Constants.OperatorConstants;
+import frc.robot.subsystems.pivot.Pivot;
+import frc.robot.subsystems.pivot.PivotIO;
+import frc.robot.subsystems.pivot.PivotIOReal;
+import frc.robot.subsystems.pivot.PivotIOSim;
+import frc.robot.subsystems.pivot.Pivot.PivotState;
+
 /**
  * This class is where the robot is declared: subsystems, controller bindings, and commands.
  */
+
+ 
 public class RobotContainer {
+    private final CommandXboxController driverController = new CommandXboxController(
+      OperatorConstants.kDriverControllerPort);
+  private final Pivot pivot;
   /** The container for the robot. Contains subsystems, OI devices, and commands. */
   public RobotContainer() {
-    // TODO (Implementation team):
-    //  1. Pick PivotIOReal on the robot or PivotIOSim in simulation (RobotBase.isReal())
-    //  2. Create the Pivot with that IO
-    //  3. configureBindings()
+    PivotIO pivotIO = RobotBase.isReal() ? new PivotIOReal() : new PivotIOSim();
+    pivot = new Pivot(pivotIO);
+    configureBindings();
   }
 
   private void configureBindings() {
-    // TODO: automatic homing trigger, controller buttons, and the zero-at-hardstop button
+   // RobotModeTriggers.autonomous().or(RobotModeTriggers.teleop()).onTrue(pivot.home().unless(pivot::isHomed));
+    driverController.a().onTrue(Commands.runOnce(() -> pivot.goToPositionDegrees(PivotState.DOWN.degrees), pivot));
+    driverController.b().onTrue(Commands.runOnce(() -> pivot.goToPositionDegrees(PivotState.STOW.degrees), pivot));
+    driverController.x().onTrue(pivot.home());
+
+        SmartDashboard.putData(
+        "Pivot/RESET ZERO AT HARDSTOP",
+        Commands.runOnce(pivot::resetZeroAtHardstop, pivot).ignoringDisable(true));
+    SmartDashboard.putNumber("Pivot/Target Degrees Slider", PivotState.DOWN.degrees);
+    driverController.x().whileTrue(Commands.run(
+        () -> pivot.goToPositionDegrees(
+            SmartDashboard.getNumber("Pivot/Target Degrees Slider", PivotState.DOWN.degrees)),
+        pivot));
+  
+
   }
 }
