@@ -3,15 +3,9 @@
 // the WPILib BSD license file in the root directory of this project.
 
 package frc.robot.subsystems.pivot;
-public interface PivotIO {
-  public static class PivotIOInputs {
-    public double positionDegrees = 0.0;
-    public double velocityDegreesPerSecond = 0.0;
-    public double statorCurrentAmps = 0.0;
-  }
-  default void updateInputs(PivotIOInputs inputs) {}
-  default void setPositionDegrees(double degrees) {}
-  default void setHomingOutput(double volts) {}
-  default void setEncoderPositionDegrees(double degrees) {}
-  default void stop() {}
-}
+
+// TODO (Implementation team): declare the PivotIO interface.
+//  - A PivotIOInputs class: positionDegrees, velocityDegreesPerSecond, statorCurrentAmps
+//  - default methods: updateInputs, setPositionDegrees, setHomingOutput,
+//    setEncoderPositionDegrees, stop
+public interface PivotIO {}
