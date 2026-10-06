@@ -23,7 +23,7 @@ public final class Constants {
     public static final double kGearRatio = 17.5;
     public static final double kStatorCurrentLimitAmps = 120.0;
     public static final double kSupplyCurrentLimitAmps = 70.0;
-    public static final double kMinPositionDegrees = -245.0;
+    public static final double kMinPositionDegrees = 0.0; // TODO (Tuning team): fully-up position (negative = up)
     public static final double kMaxPositionDegrees = 0.0;
 
 
