@@ -18,7 +18,7 @@ public final class Constants {
   }
 
   public static class PivotConstants {
-    public static final int kMotorCanId = 0; // TODO (Tuning team): find the real CAN ID
+    public static final int kMotorCanId = 44; // TODO (Tuning team): find the real CAN ID
     public static final boolean kMotorInverted = false;
     public static final double kGearRatio = 17.5;
     public static final double kStatorCurrentLimitAmps = 120.0;
@@ -29,9 +29,9 @@ public final class Constants {
 
     public static final double kCruiseVelocityDegreesPerSecond = 36000.0;
     public static final double kAccelerationDegreesPerSecondSquared = kCruiseVelocityDegreesPerSecond / kGearRatio; 
-    public static final double kP = 0.0; // TODO (Tuning team): tune
+    public static final double kP = 40.0; // TODO (Tuning team): tune
     public static final double kI = 0.0;
-    public static final double kD = 0.0;
+    public static final double kD = 5.0;
     public static final double kV = 0.0; // TODO (Tuning team): tune
 
     public static final double kHomingVolts = 3.0;
