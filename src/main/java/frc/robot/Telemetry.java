@@ -126,11 +126,6 @@ public class Telemetry {
             m_moduleTargetsArray[i * 2 + 0] = state.ModuleTargets[i].angle.getRadians();
             m_moduleTargetsArray[i * 2 + 1] = state.ModuleTargets[i].speedMetersPerSecond;
         }
-        Logger.recordOutput("SwerveStates/Measured", state.ModuleStates);
-        Logger.recordOutput("SwerveStates/Setpoints", state.ModuleTargets);
-        Logger.recordOutput("Odometry/Robot", state.Pose);
-        Logger.recordOutput("DriveState/Speeds", state.Speeds);
-        Logger.recordOutput("DriveState/OdometryFrequency", 1.0 / state.OdometryPeriod);
         SignalLogger.writeDoubleArray("DriveState/Pose", m_poseArray);
         SignalLogger.writeDoubleArray("DriveState/ModuleStates", m_moduleStatesArray);
         SignalLogger.writeDoubleArray("DriveState/ModuleTargets", m_moduleTargetsArray);
