@@ -21,6 +21,7 @@ import edu.wpi.first.wpilibj2.command.button.RobotModeTriggers;
 import frc.robot.Constants.OperatorConstants;
 import frc.robot.generated.TunerConstants;
 import frc.robot.subsystems.CommandSwerveDrivetrain;
+import frc.robot.subsystems.Limelight;
 import frc.robot.subsystems.pivot.Pivot;
 import frc.robot.subsystems.pivot.Pivot.PivotState;
 import frc.robot.subsystems.pivot.PivotIO;
@@ -36,6 +37,7 @@ public class RobotContainer {
       .withRotationalDeadband(maxAngularRate * 0.1)
       .withDriveRequestType(DriveRequestType.Velocity);
   private final Telemetry telemetry = new Telemetry(maxSpeed);
+  private final Limelight limelight = new Limelight("limelight-bow", "limelight-intake");
   private final Pivot pivot;
   private final SendableChooser<Command> autoChooser;
   private final CommandXboxController driverController =
@@ -57,6 +59,17 @@ public class RobotContainer {
   }
 
   private void configureBindings() {
+    limelight.setDefaultCommand(limelight.run(() -> {
+      var state = drivetrain.getState();
+      for (Limelight.Measurement measurement :
+          limelight.getMeasurement(state.Pose, state.Speeds.omegaRadiansPerSecond)) {
+        drivetrain.addVisionMeasurement(
+            measurement.poseEstimate.pose,
+            measurement.poseEstimate.timestampSeconds,
+            measurement.standardDeviations);
+      }
+    }).ignoringDisable(true));
+
     RobotModeTriggers.autonomous()
         .or(RobotModeTriggers.teleop())
         .onTrue(pivot.home().unless(pivot::isHomed));
