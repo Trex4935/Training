@@ -19,6 +19,9 @@ import edu.wpi.first.wpilibj2.command.SubsystemBase;
 
 import frc.robot.utility.LimelightHelpers;
 import frc.robot.utility.LimelightHelpers.PoseEstimate;
+import frc.robot.subsystems.vision.BootstrapStability;
+import edu.wpi.first.math.geometry.Rotation2d;
+import edu.wpi.first.math.geometry.Translation2d;
 
 public class Limelight extends SubsystemBase {
   /** Creates a new Limelight. */
@@ -29,9 +32,89 @@ public class Limelight extends SubsystemBase {
   private final Map<String, Double> lastAcceptedTimestamp = new HashMap<>();
   private long acceptedCount;
   private long rejectedCount;
+  // Set true only after confirming the named camera is an LL4 with its IMU configured.
+  private static final boolean kHasLimelight4Imu = true;
+  private boolean fieldHeadingInitialized;
+  private int currentImuMode = -1;
+  private double lastHeadingSeedTime = Double.NEGATIVE_INFINITY;
+  private String lastRejectionReason = "None";
+  private double latestFieldHeadingDegrees;
+  private static final String kAimCamera = "limelight-bow";
+  private double lastVisionX, lastVisionY, lastVisionHeading;
+  private int stableBootstrapFrames;
+  private final BootstrapStability bootstrapStability = new BootstrapStability();
+  private Pose2d bootstrapAnchor;
+  private String seedSource = "NONE";
+  private double lastBootstrapTimestamp;
+  private static final int kBootstrapFramesSingle = 12;
+  private static final int kBootstrapFramesMulti = 5;
+  private static final double kSingleMaxAmbiguity = 0.08;
+  private static final double kSingleMaxDistanceMeters = 3.0;
+  private static final double kBootstrapMaxPositionChange = 0.15;
+  private static final double kBootstrapMaxHeadingChangeDeg = 4.0;
+  private static final double kImuReseedSeconds = 0.50;
 
   public Limelight(String... names) {
     this.cams = names;
+  }
+
+  /** Marks a known absolute field heading; driver-forward calibration must not call this. */
+  public void initializeFieldHeading(String reason) {
+    fieldHeadingInitialized = true;
+    lastHeadingSeedTime = Timer.getFPGATimestamp();
+    seedSource = reason;
+    SmartDashboard.putString("Vision/HeadingChangeReason", reason);
+  }
+  public String getSeedSource() { return seedSource; }
+  public boolean isDriveToTagValid() {
+    return fieldHeadingInitialized && LimelightHelpers.getTV(kAimCamera)
+        && (int) LimelightHelpers.getFiducialID(kAimCamera) == 1
+        && Double.isFinite(LimelightHelpers.getTX(kAimCamera));
+  }
+
+  /** Poll MegaTag1 for a stable absolute pose. The caller applies the seed once and reports it here. */
+  public Pose2d getBootstrapPose(double speedMps, double omegaRadPerSec) {
+    if (fieldHeadingInitialized || Math.abs(speedMps) > 0.15 || Math.abs(omegaRadPerSec) > 0.15) {
+      stableBootstrapFrames = 0; bootstrapAnchor = null; publishBootstrap("WAITING_FOR_TRUSTED_VISION", 0, Double.NaN);
+      return null;
+    }
+    for (String camera : cams) {
+      PoseEstimate estimate = LimelightHelpers.getBotPoseEstimate_wpiBlue(camera);
+      if (estimate == null || !LimelightHelpers.validPoseEstimate(estimate) || estimate.pose == null
+          || estimate.tagCount <= 0 || !Double.isFinite(estimate.timestampSeconds)
+          || Timer.getFPGATimestamp() - estimate.timestampSeconds > 0.25
+          || estimate.timestampSeconds <= lastBootstrapTimestamp) continue;
+      double ambiguity = 1.0;
+      if (estimate.rawFiducials != null && estimate.rawFiducials.length > 0) {
+        ambiguity = 0.0;
+        for (var fiducial : estimate.rawFiducials) ambiguity = Math.max(ambiguity, fiducial.ambiguity);
+      }
+      boolean singleSafe = estimate.tagCount > 1 || (ambiguity >= 0 && ambiguity <= kSingleMaxAmbiguity
+          && estimate.avgTagDist > 0 && estimate.avgTagDist <= kSingleMaxDistanceMeters);
+      SmartDashboard.putNumber("Vision/Bootstrap/TagCount", estimate.tagCount);
+      SmartDashboard.putNumber("Vision/Bootstrap/Ambiguity", ambiguity);
+      if (!singleSafe) { stableBootstrapFrames = 0; bootstrapAnchor = null; continue; }
+      stableBootstrapFrames = bootstrapStability.observe(estimate.pose, estimate.timestampSeconds,
+          Timer.getFPGATimestamp(), estimate.tagCount, ambiguity, estimate.avgTagDist, speedMps, omegaRadPerSec);
+      bootstrapAnchor = estimate.pose;
+      lastBootstrapTimestamp = estimate.timestampSeconds;
+      int required = bootstrapStability.requiredFrames(estimate.tagCount);
+      publishBootstrap("BOOTSTRAPPING", estimate.tagCount, ambiguity);
+      if (stableBootstrapFrames >= required) {
+        seedSource = estimate.tagCount > 1 ? "MEGATAG1_MULTI_TAG" : "MEGATAG1_SINGLE_TAG_STABLE";
+        publishBootstrap("INITIALIZED", estimate.tagCount, ambiguity);
+        return estimate.pose;
+      }
+    }
+    if (stableBootstrapFrames == 0) publishBootstrap("WAITING_FOR_TRUSTED_VISION", 0, Double.NaN);
+    return null;
+  }
+
+  private void publishBootstrap(String state, int tags, double ambiguity) {
+    SmartDashboard.putString("Vision/Bootstrap/State", state);
+    SmartDashboard.putNumber("Vision/Bootstrap/TagCount", tags);
+    SmartDashboard.putNumber("Vision/Bootstrap/Ambiguity", ambiguity);
+    SmartDashboard.putNumber("Vision/Bootstrap/StabilityFrames", stableBootstrapFrames);
   }
 
   public List<Measurement> getMeasurement(Pose2d robotPose, double angularRateRadiansPerSecond) {
@@ -44,8 +127,17 @@ public class Limelight extends SubsystemBase {
       }
 
       // MegaTag2 expects the current blue-origin yaw and yaw rate before reading its pose.
+      latestFieldHeadingDegrees = robotPose.getRotation().getDegrees();
       LimelightHelpers.SetRobotOrientation(name, robotPose.getRotation().getDegrees(),
           Math.toDegrees(angularRateRadiansPerSecond), 0, 0, 0, 0);
+      // IMU mode 1 continually seeds an LL4; it does not establish global field heading.
+      int desiredMode = (!fieldHeadingInitialized || edu.wpi.first.wpilibj.DriverStation.isDisabled()
+          || Timer.getFPGATimestamp() - lastHeadingSeedTime < 0.50) ? 1 : 4;
+      if (kHasLimelight4Imu && name.equals("limelight-bow") && desiredMode != currentImuMode) {
+        LimelightHelpers.SetIMUMode(name, desiredMode);
+        currentImuMode = desiredMode;
+      }
+      if (!fieldHeadingInitialized) { reject(name, "Global field heading unknown"); continue; }
       if (Math.abs(angularRateRadiansPerSecond) > kMaxAngularRateRadiansPerSecond) {
         reject(name, "Angular rate too high");
         continue;
@@ -68,6 +160,7 @@ public class Limelight extends SubsystemBase {
       }
 
       double timestamp = MT2.timestampSeconds;
+      double poseJump = robotPose.getTranslation().getDistance(MT2.pose.getTranslation());
       double age = Timer.getFPGATimestamp() - timestamp;
       if (!Double.isFinite(timestamp) || timestamp <= 0
           || age > kMaxMeasurementAgeSeconds
@@ -76,22 +169,38 @@ public class Limelight extends SubsystemBase {
         reject(name, "Stale or invalid timestamp");
         continue;
       }
+      // MegaTag2 depends on supplied heading; a large one-frame jump usually means a bad solve.
+      if (poseJump > 2.5) { reject(name, "Pose jump too large"); continue; }
 
       double trust = MT2.avgTagDist / MT2.tagCount;
       double dev = .1 * trust;
       result.add(new Measurement(MT2, VecBuilder.fill(dev, dev, 999999)));
       lastAcceptedTimestamp.put(name, timestamp);
       acceptedCount++;
+      lastVisionX = MT2.pose.getX(); lastVisionY = MT2.pose.getY();
+      lastVisionHeading = MT2.pose.getRotation().getDegrees();
       SmartDashboard.putString("Vision/" + name + "/Status", "Accepted");
       SmartDashboard.putNumber("Vision/" + name + "/LastAcceptedTimestamp", timestamp);
     }
     SmartDashboard.putNumber("Vision/AcceptedCount", acceptedCount);
     SmartDashboard.putNumber("Vision/RejectedCount", rejectedCount);
+    SmartDashboard.putNumber("Vision/EstimatedFieldHeadingDeg", latestFieldHeadingDegrees);
+    SmartDashboard.putBoolean("Vision/FieldHeadingInitialized", fieldHeadingInitialized);
+    SmartDashboard.putNumber("Vision/LimelightIMUMode", currentImuMode);
+    SmartDashboard.putString("Vision/LastRejectionReason", lastRejectionReason);
     return result;
+  }
+
+  /** Fresh yaw in degrees for aiming; NaN means no usable target. */
+  public static double getForwardYawDegrees() {
+    if (!LimelightHelpers.getTV(kAimCamera)) return Double.NaN;
+    double yaw = LimelightHelpers.getTX(kAimCamera);
+    return Double.isFinite(yaw) ? yaw : Double.NaN;
   }
 
   private void reject(String name, String reason) {
     rejectedCount++;
+    lastRejectionReason = reason;
     SmartDashboard.putString("Vision/" + name + "/Status", reason);
   }
 
@@ -107,6 +216,12 @@ public class Limelight extends SubsystemBase {
 
   @Override
   public void periodic() {
-    // This method will be called once per scheduler run
+    SmartDashboard.putNumber("Vision/PoseX", lastVisionX);
+    SmartDashboard.putNumber("Vision/PoseY", lastVisionY);
+    SmartDashboard.putNumber("Vision/PoseHeadingDeg", lastVisionHeading);
+    for (String name : cams) {
+      SmartDashboard.putBoolean("Vision/" + name + "/Connected", LimelightHelpers.getTV(name));
+      SmartDashboard.putNumber("Vision/" + name + "/TagID", LimelightHelpers.getFiducialID(name));
+    }
   }
 }
