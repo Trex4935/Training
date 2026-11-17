@@ -20,8 +20,11 @@ import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import frc.robot.utility.LimelightHelpers;
 import frc.robot.utility.LimelightHelpers.PoseEstimate;
 import frc.robot.subsystems.vision.BootstrapStability;
-import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Translation2d;
+import edu.wpi.first.apriltag.AprilTagFieldLayout;
+import java.util.Optional;
+import edu.wpi.first.wpilibj.Filesystem;
+import frc.robot.Constants.VisionConstants;
 
 public class Limelight extends SubsystemBase {
   /** Creates a new Limelight. */
@@ -39,7 +42,7 @@ public class Limelight extends SubsystemBase {
   private double lastHeadingSeedTime = Double.NEGATIVE_INFINITY;
   private String lastRejectionReason = "None";
   private double latestFieldHeadingDegrees;
-  private static final String kAimCamera = "limelight-bow";
+  private double latestAcceptedPoseTimestamp;
   private double lastVisionX, lastVisionY, lastVisionHeading;
   private int stableBootstrapFrames;
   private final BootstrapStability bootstrapStability = new BootstrapStability();
@@ -53,6 +56,11 @@ public class Limelight extends SubsystemBase {
   private static final double kBootstrapMaxPositionChange = 0.15;
   private static final double kBootstrapMaxHeadingChangeDeg = 4.0;
   private static final double kImuReseedSeconds = 0.50;
+  private static final double kTargetMaxAgeSeconds = 0.25;
+  private final Map<Integer, TargetObservation> observations = new HashMap<>();
+  // Limelight does not publish its uploaded .fmap as a field layout. Keep this JSON export
+  // synchronized with that exact camera map; absent or invalid data means no field target.
+  private final AprilTagFieldLayout fieldLayout = loadSynchronizedFieldLayout();
 
   public Limelight(String... names) {
     this.cams = names;
@@ -66,10 +74,38 @@ public class Limelight extends SubsystemBase {
     SmartDashboard.putString("Vision/HeadingChangeReason", reason);
   }
   public String getSeedSource() { return seedSource; }
-  public boolean isDriveToTagValid() {
-    return fieldHeadingInitialized && LimelightHelpers.getTV(kAimCamera)
-        && (int) LimelightHelpers.getFiducialID(kAimCamera) == 1
-        && Double.isFinite(LimelightHelpers.getTX(kAimCamera));
+  public boolean hasTrustedFieldPose() { return isFieldPoseFresh(); }
+  public boolean isFieldPoseFresh() { return fieldHeadingInitialized && Timer.getFPGATimestamp()-latestAcceptedPoseTimestamp <= kMaxMeasurementAgeSeconds; }
+  public boolean hasTag(int id) { return getTargetObservation(id).valid(); }
+  public double getTagYawDegrees(int id) { return getTargetObservation(id).yawDegrees(); }
+  public double getTagPitchDegrees(int id) { return getTargetObservation(id).pitchDegrees(); }
+  public Pose2d getTagFieldPose(int id) {
+    if(fieldLayout==null)return null;
+    Optional<edu.wpi.first.math.geometry.Pose3d> pose = fieldLayout.getTagPose(id);
+    return pose.map(p -> p.toPose2d()).orElse(null);
+  }
+  public edu.wpi.first.math.geometry.Pose3d getTagFieldPose3d(int id) { return fieldLayout==null?null:fieldLayout.getTagPose(id).orElse(null); }
+  private static AprilTagFieldLayout loadSynchronizedFieldLayout() {
+    try {
+      AprilTagFieldLayout layout=new AprilTagFieldLayout(Filesystem.getDeployDirectory().toPath().resolve(VisionConstants.kTrainingMapFile));
+      if(layout.getTagPose(VisionConstants.kTrainingTagId).isEmpty()) {
+        SmartDashboard.putString("Vision/FieldMapStatus","REJECTED: Tag 28 missing from Java layout");
+        return null;
+      }
+      SmartDashboard.putString("Vision/FieldMapStatus","Loaded hallway layout with Tag 28");
+      return layout;
+    } catch(Exception e) { SmartDashboard.putString("Vision/FieldMapStatus","MISSING_OR_INVALID "+VisionConstants.kTrainingMapFile); return null; }
+  }
+  public TargetObservation getTargetObservation(int id) {
+    TargetObservation obs = observations.get(id);
+    if (obs == null) return TargetObservation.invalid(id);
+    boolean fresh = obs.valid() && Timer.getFPGATimestamp() - obs.timestampSeconds() <= kTargetMaxAgeSeconds;
+    return fresh ? obs : TargetObservation.invalid(id);
+  }
+  public boolean hasFreshFieldPose() { return isFieldPoseFresh(); }
+
+  public record TargetObservation(int id, boolean valid, double yawDegrees, double pitchDegrees, double timestampSeconds) {
+    static TargetObservation invalid(int id) { return new TargetObservation(id, false, Double.NaN, Double.NaN, Double.NaN); }
   }
 
   /** Poll MegaTag1 for a stable absolute pose. The caller applies the seed once and reports it here. */
@@ -176,6 +212,7 @@ public class Limelight extends SubsystemBase {
       double dev = .1 * trust;
       result.add(new Measurement(MT2, VecBuilder.fill(dev, dev, 999999)));
       lastAcceptedTimestamp.put(name, timestamp);
+      latestAcceptedPoseTimestamp = Math.max(latestAcceptedPoseTimestamp, timestamp);
       acceptedCount++;
       lastVisionX = MT2.pose.getX(); lastVisionY = MT2.pose.getY();
       lastVisionHeading = MT2.pose.getRotation().getDegrees();
@@ -189,13 +226,6 @@ public class Limelight extends SubsystemBase {
     SmartDashboard.putNumber("Vision/LimelightIMUMode", currentImuMode);
     SmartDashboard.putString("Vision/LastRejectionReason", lastRejectionReason);
     return result;
-  }
-
-  /** Fresh yaw in degrees for aiming; NaN means no usable target. */
-  public static double getForwardYawDegrees() {
-    if (!LimelightHelpers.getTV(kAimCamera)) return Double.NaN;
-    double yaw = LimelightHelpers.getTX(kAimCamera);
-    return Double.isFinite(yaw) ? yaw : Double.NaN;
   }
 
   private void reject(String name, String reason) {
@@ -222,6 +252,25 @@ public class Limelight extends SubsystemBase {
     for (String name : cams) {
       SmartDashboard.putBoolean("Vision/" + name + "/Connected", LimelightHelpers.getTV(name));
       SmartDashboard.putNumber("Vision/" + name + "/TagID", LimelightHelpers.getFiducialID(name));
+    }
+    updateTargetObservations();
+  }
+
+  private void updateTargetObservations() {
+    double now = Timer.getFPGATimestamp();
+    for (String camera : cams) {
+      var targeting = LimelightHelpers.getLatestResults(camera);
+      if (targeting == null) continue;
+      if (!targeting.valid || targeting.targets_Fiducials == null) continue;
+      double timestamp = targeting.timestamp_RIOFPGA_capture;
+      for (var target : targeting.targets_Fiducials) {
+        int id = (int) target.fiducialID;
+        if (id <= 0 || !Double.isFinite(target.tx) || !Double.isFinite(target.ty)) continue;
+        if (!Double.isFinite(timestamp) || timestamp <= 0 || now - timestamp > kTargetMaxAgeSeconds || timestamp > now + kFutureTimestampToleranceSeconds) continue;
+        TargetObservation previous = observations.get(id);
+        if (previous == null || timestamp > previous.timestampSeconds())
+          observations.put(id, new TargetObservation(id, true, target.tx, target.ty, timestamp));
+      }
     }
   }
 }

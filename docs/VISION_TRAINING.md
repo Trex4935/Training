@@ -1,39 +1,37 @@
-# Vision and driver heading
+# Vision commands for students
 
-The swerve drivetrain continuously estimates motion from its gyro and wheel encoders. Limelight MegaTag2 uses AprilTags plus the robot's current field heading to estimate field X/Y. The timestamp lets CTRE apply a camera frame at its capture time, then replay the later odometry. Filtering avoids stale, duplicate, non-finite, and implausibly distant frames.
+`Limelight` owns camera details: MegaTag1 heading bootstrap, MegaTag2 pose measurements, filtering, IMU modes, tag observations, timestamps, and access to tag field poses. Commands use its small API and never need `LimelightHelpers`.
 
-Read `CommandSwerveDrivetrain`, `Limelight`, then `RobotContainer`. The pose shown by CTRE telemetry is the fused global estimate; Limelight pose keys show the latest accepted camera pose.
+Field poses use blue-origin coordinates: X forward, Y left, and positive heading counterclockwise. Camera `tx` is a horizontal angle in degrees; it is useful for aiming but does not tell you a reliable field distance. Vision observations expire after 0.25 s. Field navigation additionally needs a recently accepted MegaTag2 pose.
+
+An AprilTag's **field pose** is its absolute position and orientation in the field map. A **POI** is where the robot should be relative to that tag. `TagApproach.Config` holds the selected tag ID, tag-local forward/left offsets, relative robot heading, robot length/width, clearance, and mount type. The tag's orientation rotates those offsets into field coordinates; Java does not store tag field X/Y values.
 
 ## Controls
 
-- Left bumper calibrates the driver's forward direction to the robot's current estimated heading. It changes operator perspective only; it does not reset global pose or gyro calibration.
-- Back returns to blue/standard perspective. The drivetrain's normal disabled-periodic alliance code may apply red perspective when disabled and the DS reports red.
-- Hold right bumper to rotate toward the visible tag in `limelight-bow`; translation remains on the sticks. If the target disappears, rotation output is zero and the default manual command resumes on release.
+- Left stick translates; right stick rotates manually.
+- LB sets driver-forward perspective only. Back restores standard perspective.
+- Hold RB to rotate toward explicitly selected training tag ID 28 while keeping stick translation.
+- Hold A to drive to a conservative field pose relative to that tag.
+- Hold X to orbit the selected tag-relative POI counterclockwise while maintaining the configured heading.
+- Hold Y to approach the configured overhead POI. For wall-mounted tags, select the `WALL` mount and use a negative local-forward offset away from the tag face. Configure offsets and clearance in `RobotContainer` before use.
 
-## Hallway setup and testing
+All behavior commands require the drivetrain. Releasing the button cancels the command, stops its output, and lets default manual driving resume. If target or localization data expires, automated commands stop. Speeds and tolerances are in `FaceTag`, `DriveToTagPose`, and `OrbitTag` for easy student tuning.
 
-Configure Limelight name and physical camera mounting (forward-facing `limelight-bow`) in `RobotContainer`/`Limelight`. Configure the Limelight's own AprilTag map with the actual hallway tag ID and measured field pose, using the blue-origin NWU convention (X forward, Y left, yaw counterclockwise). No competition field coordinates are included here. MegaTag2 needs a valid field heading; initially align the robot to the map's known heading or use a heading-capable bootstrap before trusting its position.
+## Make a small vision command
 
-1. Enable with no tags and drive slowly; odometry should continue.
-2. Confirm the camera sees the known tag, accepted measurements update pose, and X/Y/heading telemetry is finite.
-3. At robot headings 0, 90, 180, and 270 degrees, press left bumper and check stick-forward drives away from the driver-defined rear reference as intended. Back restores standard perspective.
-4. Hold right bumper while viewing a tag. Translation should remain responsive. If it turns away, reverse the yaw sign in `RobotContainer` after checking camera orientation.
-5. Calibrate manual forward, then acquire a tag; vision should refine pose without changing driver perspective. Disable/re-enable and confirm alliance perspective behavior.
+1. Add a `Command` with the drivetrain as a requirement.
+2. Ask `Limelight` for one measurement, such as a timestamp-checked yaw or tag field pose.
+3. Check validity before using it. An invalid observation means stop.
+4. Calculate a small error (target minus current measurement).
+5. Convert the error to bounded drivetrain velocity with PID or simple geometry.
+6. Stop in `end()` so release or interruption is safe.
 
-Tune the aiming PID with low proportional gain first. Increase until response is useful, then add a small derivative term only if it oscillates. The angular output is capped at 1.5 rad/s and has a 1.5 degree dead zone. A reversed turn means yaw sign or camera mounting convention is reversed.
+Keep camera parsing and localization inside `Limelight`. Do not reset pose or heading from a student movement command. `TagApproach` transforms the POI from tag axes into field axes and projects its height onto the robot floor plane. It checks clearance using the robot's circumscribed radius. These commands do not avoid obstacles.
 
-Common issues: wrong NetworkTables camera name, unconfigured Limelight map, wrong robot-to-camera transform, stale NetworkTables frames, incorrect field heading supplied to MegaTag2, and inverted camera yaw. Validate map pose and camera transform on the actual robot before relying on localization. Build success is not physical validation.
+## Setup and hardware checks
 
-## Hardware validation checklist
+The LL4's uploaded `.fmap` is authoritative and is not exposed as tag poses through NetworkTables. Java loads `src/main/deploy/hallway-28.json`, converted from the same `fiducials.fmap` source using `LimelightFmapConverter`. The conversion changes the centered field origin used by the FMAP into WPILib's blue-alliance origin using the source field dimensions, while preserving each tag's 3D rotation and height. Regenerate it with `./gradlew convertLimelightFmap -Pfmap=<source.fmap> -PfmapOutput=src/main/deploy/hallway-28.json` whenever the source map changes. If the JSON is absent, invalid, or does not contain ID 28, field-pose commands stop; no season-layout or coordinate fallback is used. Keep the original `.fmap` uploaded to the camera.
 
-- Confirm each Limelight model and firmware. LL4 IMU modes stay disabled in this project until the camera is confirmed and `kHasLimelight4Imu` is intentionally enabled.
-- Measure and configure each camera-to-robot transform (forward, left, height, roll, pitch, yaw) in the Limelight configuration.
-- Configure the physical hallway AprilTag layout with the correct tag family, ID, field X/Y/height, and orientation. Do not use competition field coordinates.
-- Test single-tag bootstrap from several stationary viewpoints. It requires low ambiguity and 12 consecutive fresh, stable frames.
-- After initialization, compare MegaTag1 and MegaTag2 pose estimates before enabling sustained driving.
-- Verify driver perspective before and after bootstrap; pose seeding must not change joystick-forward.
-- Verify tag-lock rotation sign at low speed and confirm target loss stops automatic rotation immediately.
+Before motion, confirm that the selected tag exists in both maps, the camera transform and field heading are correct, and the relative POI has safe clearance. Start on blocks or at very low speed with a spotter and a clear stopping area.
 
-## Low-speed drive-to-tag exercise
-
-With the robot on blocks or in a cleared, supervised hallway, first confirm the configured tag ID and pose. The A hold command uses tag 1's configured pose and approaches along the tag's local negative X axis. Its final center distance is the larger of the requested standoff and the robot front extent plus clearance. The sample speed limit is 0.6 m/s; lower it further for first tests. Confirm global heading has bootstrapped and the selected tag is visible before holding A. Keep an operator ready to release A; release or command interruption brakes the drivetrain. Test the target pose geometry on paper/simulation first, then use a spotter and a large clear stopping area. This command does not avoid obstacles.
+Automated hardware validation remains required: verify selected-tag visibility and freshness, field-layout alignment, MegaTag2 pose acceptance, driver perspective behavior, motion directions, target-loss stopping, cancellation/manual resumption, and wall/overhead offsets. A successful software build does not validate camera calibration or physical clearances.

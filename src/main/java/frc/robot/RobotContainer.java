@@ -11,23 +11,22 @@ import static edu.wpi.first.units.Units.RotationsPerSecond;
 import com.ctre.phoenix6.swerve.SwerveModule.DriveRequestType;
 import com.ctre.phoenix6.swerve.SwerveRequest;
 import com.pathplanner.lib.auto.AutoBuilder;
-import edu.wpi.first.wpilibj.RobotBase;
 import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
-import edu.wpi.first.math.controller.PIDController;
 import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
 import edu.wpi.first.wpilibj2.command.button.RobotModeTriggers;
 import frc.robot.Constants.OperatorConstants;
+import frc.robot.Constants.VisionConstants;
 import frc.robot.generated.TunerConstants;
 import frc.robot.subsystems.CommandSwerveDrivetrain;
 import frc.robot.subsystems.Limelight;
 import frc.robot.commands.DriveToTagPose;
 import frc.robot.commands.TagApproach;
-import edu.wpi.first.math.geometry.Pose2d;
-import edu.wpi.first.math.geometry.Rotation2d;
-
+import frc.robot.commands.FaceTag;
+import frc.robot.commands.OrbitTag;
+import frc.robot.commands.DriveUnderTag;
 
 public class RobotContainer {
   private final CommandSwerveDrivetrain drivetrain = TunerConstants.createDrivetrain();
@@ -40,8 +39,8 @@ public class RobotContainer {
   private final Telemetry telemetry = new Telemetry(maxSpeed);
   private final Limelight limelight = new Limelight("limelight-bow", "limelight-intake");
   private final SendableChooser<Command> autoChooser;
-  private final CommandXboxController driverController =
-      new CommandXboxController(OperatorConstants.kDriverControllerPort);
+  private final CommandXboxController driverController = new CommandXboxController(
+      OperatorConstants.kDriverControllerPort);
 
   public RobotContainer() {
 
@@ -69,8 +68,8 @@ public class RobotContainer {
         // Keep the driver reference fixed through global pose initialization.
         SmartDashboard.putString("Vision/HeadingChangeReason", "Global pose seeded from stable MegaTag1");
       }
-      for (Limelight.Measurement measurement :
-          limelight.getMeasurement(state.Pose, state.Speeds.omegaRadiansPerSecond)) {
+      for (Limelight.Measurement measurement : limelight.getMeasurement(state.Pose,
+          state.Speeds.omegaRadiansPerSecond)) {
         drivetrain.addVisionMeasurement(
             measurement.poseEstimate.pose,
             measurement.poseEstimate.timestampSeconds,
@@ -83,7 +82,8 @@ public class RobotContainer {
         .withVelocityY(-driverController.getLeftX() * maxSpeed)
         .withRotationalRate(-driverController.getRightX() * maxAngularRate)));
 
-    // Redefine only the driver's field-centric reference; the estimator pose stays global.
+    // Redefine only the driver's field-centric reference; the estimator pose stays
+    // global.
     driverController.leftBumper().onTrue(Commands.runOnce(() -> {
       var heading = drivetrain.getState().Pose.getRotation();
       drivetrain.setOperatorPerspectiveForward(heading);
@@ -96,24 +96,20 @@ public class RobotContainer {
       SmartDashboard.putString("Vision/ControlMode", "Competition");
     }));
 
-    PIDController tagPid = new PIDController(0.035, 0.0, 0.001);
-    driverController.rightBumper().whileTrue(Commands.run(() -> {
-      double yaw = Limelight.getForwardYawDegrees();
-      double omega = 0;
-      if (Double.isFinite(yaw)) {
-        omega = Math.max(-1.5, Math.min(1.5, -tagPid.calculate(yaw, 0)));
-        if (Math.abs(yaw) < 1.5) omega = 0;
-      }
-      drivetrain.setControl(drive.withVelocityX(-driverController.getLeftY() * maxSpeed)
-          .withVelocityY(-driverController.getLeftX() * maxSpeed)
-          .withRotationalRate(omega));
-    }, drivetrain).beforeStarting(tagPid::reset));
-
-    // Hallway example layout: tag 1 at (2, 1) m, facing away from the tag along its local +X.
-    // Replace this with the measured hallway pose. Robot-front radius plus clearance is 0.55 m.
-    Pose2d hallwayTag = new Pose2d(2.0, 1.0, Rotation2d.kZero);
-    Pose2d approach = TagApproach.target(hallwayTag, 0.8, 0.42, 0.13);
-    driverController.a().whileTrue(new DriveToTagPose(drivetrain, () -> approach, limelight::isDriveToTagValid));
+    final int selectedTagId = VisionConstants.kTrainingTagId;
+    final TagApproach.Config wallPoi = new TagApproach.Config(selectedTagId, -1.0, 0.0, 0.0, 0.84, 0.84, 0.15,
+        TagApproach.Mount.WALL);
+    final TagApproach.Config overheadPoi = new TagApproach.Config(selectedTagId, 0.8, 0.0, 0.0, 0.84, 0.84, 0.15,
+        TagApproach.Mount.OVERHEAD);
+    driverController.rightBumper().whileTrue(new FaceTag(limelight, selectedTagId, drivetrain,
+        () -> -driverController.getLeftY() * 0.8, () -> -driverController.getLeftX() * 0.8));
+    driverController.a().whileTrue(new DriveToTagPose(drivetrain,
+        () -> TagApproach.target(limelight.getTagFieldPose3d(selectedTagId), wallPoi),
+        limelight::hasTrustedFieldPose));
+    driverController.x().whileTrue(
+        new OrbitTag(drivetrain, () -> TagApproach.target(limelight.getTagFieldPose3d(selectedTagId), wallPoi),
+            limelight::hasTrustedFieldPose, 1.0, false));
+    driverController.y().whileTrue(new DriveUnderTag(limelight, drivetrain, overheadPoi));
 
   }
 

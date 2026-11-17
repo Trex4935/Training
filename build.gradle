@@ -101,6 +101,19 @@ deployArtifact.jarTask = jar
 wpi.java.configureExecutableTasks(jar)
 wpi.java.configureTestTasks(test)
 
+tasks.register('convertLimelightFmap', JavaExec) {
+    group = 'vision'
+    description = 'Convert a Limelight .fmap to WPILib AprilTagFieldLayout JSON.'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'frc.robot.utility.LimelightFmapConverter'
+    doFirst {
+        if (!project.hasProperty('fmap') || !project.hasProperty('fmapOutput')) {
+            throw new GradleException('Pass -Pfmap=<source.fmap> -PfmapOutput=<output.json>')
+        }
+        args project.property('fmap'), project.property('fmapOutput')
+    }
+}
+
 // Configure string concat to always inline compile
 tasks.withType(JavaCompile) {
     options.compilerArgs.add '-XDstringConcat=inline'

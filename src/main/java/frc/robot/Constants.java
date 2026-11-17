@@ -17,6 +17,12 @@ public final class Constants {
     public static final int kDriverControllerPort = 0;
   }
 
+  public static class VisionConstants {
+    /** One-tag hallway map supplied to the Limelight and paired Java layout export. */
+    public static final int kTrainingTagId = 28;
+    public static final String kTrainingMapFile = "hallway-28.json";
+  }
+
   public static class PivotConstants {
     public static final int kMotorCanId = 2;
     public static final boolean kMotorInverted = false;
