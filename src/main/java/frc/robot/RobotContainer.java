@@ -22,11 +22,7 @@ import frc.robot.Constants.OperatorConstants;
 import frc.robot.generated.TunerConstants;
 import frc.robot.subsystems.CommandSwerveDrivetrain;
 import frc.robot.subsystems.Limelight;
-import frc.robot.subsystems.pivot.Pivot;
-import frc.robot.subsystems.pivot.Pivot.PivotState;
-import frc.robot.subsystems.pivot.PivotIO;
-import frc.robot.subsystems.pivot.PivotIOReal;
-import frc.robot.subsystems.pivot.PivotIOSim;
+
 
 public class RobotContainer {
   private final CommandSwerveDrivetrain drivetrain = TunerConstants.createDrivetrain();
@@ -38,14 +34,12 @@ public class RobotContainer {
       .withDriveRequestType(DriveRequestType.Velocity);
   private final Telemetry telemetry = new Telemetry(maxSpeed);
   private final Limelight limelight = new Limelight("limelight-bow", "limelight-intake");
-  private final Pivot pivot;
   private final SendableChooser<Command> autoChooser;
   private final CommandXboxController driverController =
       new CommandXboxController(OperatorConstants.kDriverControllerPort);
 
   public RobotContainer() {
-    PivotIO pivotIO = RobotBase.isReal() ? new PivotIOReal() : new PivotIOSim();
-    pivot = new Pivot(pivotIO);
+
     drivetrain.registerTelemetry(telemetry::telemeterize);
 
     if (drivetrain.isAutoBuilderConfigured()) {
@@ -70,30 +64,11 @@ public class RobotContainer {
       }
     }).ignoringDisable(true));
 
-    RobotModeTriggers.autonomous()
-        .or(RobotModeTriggers.teleop())
-        .onTrue(pivot.home().unless(pivot::isHomed));
-
     drivetrain.setDefaultCommand(drivetrain.applyRequest(() -> drive
         .withVelocityX(-driverController.getLeftY() * maxSpeed)
         .withVelocityY(-driverController.getLeftX() * maxSpeed)
         .withRotationalRate(-driverController.getRightX() * maxAngularRate)));
 
-    driverController.a().onTrue(
-        Commands.runOnce(() -> pivot.goToPositionDegrees(PivotState.DOWN.degrees), pivot));
-    driverController.b().onTrue(
-        Commands.runOnce(() -> pivot.goToPositionDegrees(PivotState.STOW.degrees), pivot));
-    driverController.start().onTrue(pivot.home());
-    SmartDashboard.putData(
-        "Pivot/RESET ZERO AT HARDSTOP",
-        Commands.runOnce(pivot::resetZeroAtHardstop, pivot).ignoringDisable(true));
-    driverController.povUp().whileTrue(pivot.agitate);
-
-    SmartDashboard.putNumber("Pivot/Target Degrees Slider", PivotState.DOWN.degrees);
-    driverController.x().whileTrue(Commands.run(
-        () -> pivot.goToPositionDegrees(
-            SmartDashboard.getNumber("Pivot/Target Degrees Slider", PivotState.DOWN.degrees)),
-        pivot));
   }
 
   public Command getAutonomousCommand() {
